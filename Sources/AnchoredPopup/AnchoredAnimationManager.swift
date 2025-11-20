@@ -200,7 +200,9 @@ fileprivate struct AnchoredAnimationView<V>: View where V: View {
     @State private var triggerButtonFrame: IntRect = .zero
     @State private var contentSize: IntSize = .zero
 
-    @State private var semaphore = DispatchSemaphore(value: 1)
+    // @State private var semaphore = DispatchSemaphore(value: 1)
+    // 1. 替换 Semaphore 为一个简单的布尔状态标志
+    @State private var isAnimating: Bool = false
 
     var body: some View {
         VStack {
@@ -210,6 +212,12 @@ fileprivate struct AnchoredAnimationView<V>: View where V: View {
                         DispatchQueue.main.async {
                             contentSize = geo.size.toIntSize()
                             if let animation = AnchoredAnimationManager.shared.animations.first(where: { $0.id == id }) {
+
+                                // 初始状态设置，在 onAppear 时就绪
+                                if animation.state == .growing {
+                                    setHiddenState()
+                                }
+
                                 setupAndLaunchAnimation(animation)
                             }
                         }
@@ -244,45 +252,79 @@ fileprivate struct AnchoredAnimationView<V>: View where V: View {
     private func setupAndLaunchAnimation(_ animation: AnchoredAnimationManager.AnimationItem) {
         if contentSize == .zero || triggerButtonFrame == .zero { return }
 
-        semaphore.wait()
-        if animation.state == .growing {
-            setHiddenState()
+        // 2. 使用状态标志作为守卫，防止动画进行时被重入
+        if isAnimating {
+            return
+        }
 
-            if #available(iOS 17.0, *) {
-                withAnimation(params.animation) {
-                    setDisplayedState()
-                } completion: {
-                    AnchoredAnimationManager.shared.changeStateForAnimation(for: id, state: .displayed)
-                    semaphore.signal()
-                }
-            } else {
-                withAnimation(params.animation) {
-                    setDisplayedState()
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    AnchoredAnimationManager.shared.changeStateForAnimation(for: id, state: .displayed)
-                    semaphore.signal()
-                }
-            }
-        } else if animation.state == .shrinking {
-            if #available(iOS 17.0, *) {
-                withAnimation(params.animation) {
-                    setHiddenState()
-                } completion: {
-                    AnchoredAnimationManager.shared.changeStateForAnimation(for: id, state: .hidden)
-                    semaphore.signal()
-                }
-            } else {
-                withAnimation(params.animation) {
-                    setHiddenState()
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    AnchoredAnimationManager.shared.changeStateForAnimation(for: id, state: .hidden)
-                    semaphore.signal()
-                }
+        // semaphore.wait()
+        let currentState = animation.state
+        let isVisuallyHidden = animatableOpacity == 0
+
+
+         if currentState == .growing && isVisuallyHidden {
+            // 只有在视图当前是隐藏状态时才执行“ growing”动画
+            performGrowingAnimation()
+        } else if currentState == .shrinking && !isVisuallyHidden {
+            // 只有在视图当前是可见状态时才执行“shrinking”动画
+            performShrinkingAnimation()
+        }
+
+        
+    }
+
+
+    private func performGrowingAnimation() {
+        // 3. 在动画开始前锁定
+        isAnimating = true
+        setHiddenState() // 确保从正确的隐藏状态开始
+
+        if #available(iOS 17.0, *) {
+            withAnimation(params.animation) {
+                setDisplayedState()
+            } completion: {
+                AnchoredAnimationManager.shared.changeStateForAnimation(for: id, state: .displayed)
+                // 4. 在动画完成后解锁
+                isAnimating = false
             }
         } else {
-            semaphore.signal()
+            withAnimation(params.animation) {
+                setDisplayedState()
+            }
+            // 使用在 PopupParameters 中定义的动画时长
+            DispatchQueue.main.asyncAfter(deadline: .now() + params.animationDuration) {
+                AnchoredAnimationManager.shared.changeStateForAnimation(for: id, state: .displayed)
+                // 4. 在动画完成后解锁
+                isAnimating = false
+            }
+        }
+    }
+
+
+    private func performShrinkingAnimation() {
+        // 3. 在动画开始前锁定
+        isAnimating = true
+
+        if #available(iOS 17.0, *) {
+            withAnimation(params.animation) {
+                setHiddenState()
+            } completion: {
+                params.onDisappear?()
+                AnchoredAnimationManager.shared.changeStateForAnimation(for: id, state: .hidden)
+                // 4. 在动画完成后解锁
+                isAnimating = false
+            }
+        } else {
+            withAnimation(params.animation) {
+                setHiddenState()
+            }
+            // 使用在 PopupParameters 中定义的动画时长
+            DispatchQueue.main.asyncAfter(deadline: .now() + params.animationDuration) {
+                params.onDisappear?()
+                AnchoredAnimationManager.shared.changeStateForAnimation(for: id, state: .hidden)
+                // 4. 在动画完成后解锁
+                isAnimating = false
+            }
         }
     }
 
