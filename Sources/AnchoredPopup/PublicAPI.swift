@@ -52,6 +52,7 @@ public enum AnchoredPopupBackground {
 public struct PopupParameters {
     var position: AnchoredPopupPosition = .screenRelative()
     var animation: Animation = .easeIn(duration: 0.3)
+    var animationDuration: TimeInterval = 0.3
 
     /// Should close on tap anywhere inside the popup
     var closeOnTap: Bool = true
@@ -63,6 +64,10 @@ public struct PopupParameters {
     var isPassthrough: Bool = false
 
     var background: AnchoredPopupBackground = .blur()
+
+
+    // 添加一个属性来存储消失时的回调
+    var onDisappear: SendableClosure? = nil
 
     public func position(_ position: AnchoredPopupPosition) -> PopupParameters {
         var params = self
@@ -102,6 +107,14 @@ public struct PopupParameters {
     public func background(_ background: AnchoredPopupBackground) -> PopupParameters {
         var params = self
         params.background = background
+        return params
+    }
+
+    // 添加一个新的链式调用方法，让用户可以设置回调
+    /// Action to be executed after the disappearance animation is completed
+    public func onDisappear(_ action: @escaping SendableClosure) -> PopupParameters {
+        var params = self
+        params.onDisappear = action
         return params
     }
 }
